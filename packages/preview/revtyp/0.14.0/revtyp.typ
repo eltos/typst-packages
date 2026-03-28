@@ -114,7 +114,10 @@
       // ensure affiliation is an array
       a.insert("affiliation", (a.remove("affiliation"),))
     }
-    if "name" in a.keys() { a.insert("name", a.name.trim(" ")) }
+    if "name" in a.keys() { 
+      if a.name.starts-with("\n") { a.insert("prebreak", true) }
+      a.insert("name", a.name.trim()) 
+    }
     a
   })
   authors = authors.filter(a => "name" in a.keys())
@@ -328,6 +331,7 @@
             numbers = (..numbers, titlefootnote(author.note))
           }
           numbers = numbers.map(n => [#n]) // convert everything to content for joining
+          if author.at("prebreak", default: false) {linebreak()}
           keep-together({
             author.name
             if "orcid" in author { orcid(author.orcid) + h(-1pt) }
@@ -501,7 +505,7 @@
       line(length: 35pt, stroke: 0.5pt)
 
       context for (symbol, text) in footnotes.get() {
-        h(0.7em) + super(symbol) + sym.space.med + text
+        h(0.7em) + super(symbol) + /*sym.space.med +*/ text
         linebreak()
       }
 
@@ -577,6 +581,7 @@
     v(0.5em)
   }
   show figure: set figure(supplement: "FIG.")
+  set figure.caption(separator: ". ")
   show figure.caption: it => {
     set par(first-line-indent: 0em)
     set text(size: 9.5pt)
@@ -626,9 +631,11 @@
     if it.func() == figure and it.kind == image {
       "Fig."
     } else if it.func() == figure and it.kind == table {
-      "table"
+      "Table"
     } else if it.func() == math.equation {
       "Eq."
+    } else if it.func() == heading {
+      "Sec."
     } else {
       it.supplement
     }
@@ -639,10 +646,12 @@
       show regex("\d"): it => text(fill: link-color, "(" + it + ")")
       it
     } else if it.element != none and it.element.func() == heading {
-      let supplement = if type(it.supplement) == function { "section" } else {
+      let supplement = if type(it.supplement) == function {
+        (it.supplement)(it.element)
+      } else {
         it.supplement
       }
-      [#supplement #text(fill: link-color, numbering(
+      [#supplement #link(it.element.label, numbering(
           "I A",
           ..counter(heading).at(it.element.location()),
         ))]
