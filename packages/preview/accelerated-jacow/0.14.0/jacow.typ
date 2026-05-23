@@ -104,7 +104,10 @@
       // ensure affiliation is an array
       a.insert("affiliation", (a.remove("affiliation"),))
     }
-    if "name" in a.keys() { a.insert("name", a.name.trim(" ")) }
+    if "name" in a.keys() {
+      if a.name.starts-with("\n") { a.insert("prebreak", true) }
+      a.insert("name", a.name.trim())
+    }
     a
   })
   authors = authors.filter(a => "name" in a.keys())
@@ -120,25 +123,54 @@
     if i < 6 { ("*", "#", "§", "¶", "‡").at(i - 1) } else { (i - 4) * "*" }
   }
 
+  /// Remove white space at begin and end
+  let strip-white-space(content) = {
+    if (content.has("children")) {
+      let clean = content.children
+      for i in (0, -1) {
+        while (
+          clean.len() > 0 and repr(clean.at(i).func()) in ("space", "parbreak")
+        ) {
+          _ = clean.remove(i)
+        }
+      }
+      clean.join()
+    } else {
+      content
+    }
+  }
+
+  /// Check if content ends with string
+  let ends-with(content, end) = {
+    if (content.has("children")) {
+      return ends-with(content.children.filter(c => c.has("text")).last(), end)
+    } else if (content.has("text")) {
+      return content.text.clusters().at(-1).ends-with(end)
+    } else {
+      return false
+    }
+  }
+
   /// Capitalize all characters in the text, e.g. "THIS IS AN ALLCAPS HEADING"
   let allcaps = upper
 
   /// Capitalize major words, e.g. "This is a Word-Caps Heading"
   /// Heuristic until we have https://github.com/typst/typst/issues/1707
-  let wordcaps(body) = {
+  let wordcaps(body, is-segment: false) = {
     if body.has("text") {
       let txt = body.text //lower(body.text)
-      let words = txt.matches(regex("^()(\\w+)")) // first word
+      let words = ()
+      if (not is-segment) { words += txt.matches(regex("^()(\\w+)")) } // first word
       words += txt.matches(regex("([.:;?!]\s+)(\\w+)")) // words after punctuation
       words += txt.matches(regex("()(\\w{4,})")) // words with 4+ letters
       for m in words {
         let (pre, word) = m.captures
-        word = upper(word.at(0)) + word.slice(1)
-        txt = txt.slice(0, m.start) + pre + word + txt.slice(m.end)
+        let (w, ord) = (word.clusters().at(0), word.clusters().slice(1).join())
+        txt = txt.slice(0, m.start) + pre + upper(w) + ord + txt.slice(m.end)
       }
       txt
     } else if body.has("children") {
-      body.children.map(it => wordcaps(it)).join()
+      body.children.map(it => wordcaps(it, is-segment: true)).join()
     } else {
       body
     }
@@ -154,7 +186,7 @@
 
   let paper = (
     if lower(paper-size) == "a4" {
-      (width: 21mm, height: 29.7mm)
+      (width: 21cm, height: 29.7cm)
     } else if lower(paper-size) in ("us", "letter", "us-letter") {
       (width: 8.5in, height: 11in)
     } else if lower(paper-size) in ("jacow", "test") {
@@ -176,11 +208,7 @@
     height: if lower(paper-size) == "test" { auto } else { paper.height },
     margin: (
       left: left-margin,
-      right: paper.width
-        - left-margin
-        - 2 * column-width
-        - column-gutter
-        + 0.4mm,
+      right: paper.width - left-margin - 2 * column-width - column-gutter + 0.4mm,
       top: paper.height - bottom-margin - column-height + 0.005in,
       bottom: bottom-margin + 0.03in,
     ),
@@ -217,8 +245,7 @@
       // until we have https://github.com/typst/typst/issues/1322
       #set text(fill: red, size: 13pt, weight: "bold")
       #context if (
-        page-limit != none
-          and query(<content-end>).at(0).location().page() > page-limit
+        page-limit != none and query(<content-end>).at(0).location().page() > page-limit
       ) [
         Limit of #page-limit pages exceeded
       ]
@@ -241,10 +268,10 @@
             at(x: left-margin + i * 1cm, line(angle: 90deg, ..style))
             at(y: bottom-margin + i * 0.5in, line(..style))
             set text(fill: gray.darken(50%))
-            at(x: left-margin + i * 1cm, y: bottom-margin - 0.5in, if i
-              == 1 [1 cm] else if i >= 0 [#i])
-            at(x: left-margin - 1cm, y: bottom-margin + i * 0.5in, if i
-              == 1 [½ in] else if i >= 0 { str(i / 2).replace(".5", "½") })
+            at(x: left-margin + i * 1cm, y: bottom-margin - 0.5in, if i == 1 [1 cm] else if i >= 0 [#i])
+            at(x: left-margin - 1cm, y: bottom-margin + i * 0.5in, if i == 1 [½ in] else if i >= 0 {
+              str(i / 2).replace(".5", "½")
+            })
           }
           // page and column borders
           #at(rect(width: 21cm, height: 29.7cm)) // DIN A4
@@ -348,6 +375,7 @@
       }
 
       let author-entry(author, numbers: none) = {
+        if author.at("prebreak", default: false) { linebreak() }
         keep-together({
           author.name
           if "email" in author { titlefootnote(author.email) }
@@ -384,9 +412,7 @@
           // Grouped by Affiliation
           // **********************
 
-          let primary-affiliations = authors
-            .map(a => a.affiliation.first())
-            .dedup()
+          let primary-affiliations = authors.map(a => a.affiliation.first()).dedup()
           let also-at = authors
             .sorted(key: a => primary-affiliations.position(i => (
               i == a.affiliation.first()
@@ -412,8 +438,7 @@
             layout(it => {
               let combined-entry = author-content + ", " + affiliation-content
               if (
-                measure(author-content, width: it.width).height
-                  == measure(combined-entry, width: it.width).height
+                measure(author-content, width: it.width).height == measure(combined-entry, width: it.width).height
               ) {
                 combined-entry + "\n"
               } else {
@@ -527,18 +552,19 @@
   show figure.caption: it => {
     set par(first-line-indent: 0em)
     layout(size => context {
+      let body = strip-white-space(it.body) // removes trailing whitespace
+      if (it.kind == table) {
+        // table captions take the form of a heading (word caps)
+        body = wordcaps(body)
+      } else {
+        // figure captions must end with a period
+        if (not ends-with(body, ".")) { body += "." }
+      }
+      let caption = [#it.supplement #it.counter.display()#it.separator#body]
       align(
         // center for single-line, left for multi-line captions
-        if measure(it).width < size.width { center } else { left },
-        if sys.version >= version(0, 13) {
-          // workaround for https://github.com/typst/typst/issues/5472#issuecomment-2730205275
-          block(
-            width: size.width,
-            context [#it.supplement #it.counter.display()#it.separator#it.body],
-          )
-        } else {
-          block(width: size.width, it) // use full width and justify
-        },
+        if measure(caption).width < size.width { center } else { left },
+        block(width: size.width, caption),
       )
     })
   }
@@ -593,6 +619,7 @@
       )
 
       if is-doi {
+        set text(fill: cmyk(73%, 37%, 0%, 22%))
         // Avoid breaking DOI: Put in same line if it fits, otherwise force into new line
         let link-on-new-line = state("link-on-new-line", false)
         box(width: 1fr, layout(it => {
